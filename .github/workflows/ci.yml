@@ -99,15 +99,8 @@ jobs:
         run: |
           pip install -r requirements.txt requests
           python scripts/load_test.py --url http://localhost:30080 --period test --rps 20 --seconds 90
-      - name: Check Prometheus scrapes the API and Grafana has the dashboard
-        run: |
-          sleep 30
-          curl -s 'localhost:30090/api/v1/query?query=up{job="energy-api"}' | tee up.json
-          python -c "import json; r=json.load(open('up.json'))['data']['result']; assert r and all(x['value'][1]=='1' for x in r), r"
-          curl -s 'localhost:30090/api/v1/query?query=sum(energy_api_requests_total)' | tee req.json
-          python -c "import json; r=json.load(open('req.json'))['data']['result']; assert float(r[0]['value'][1]) > 100, r"
-          curl -s -u "admin:${TF_VAR_grafana_admin_password}" 'localhost:30030/api/search?query=Energy%20Forecast%20API' | tee dash.json
-          python -c "import json; assert json.load(open('dash.json')), 'dashboard missing'"
+      - name: Check Prometheus scrapes the API, rules are loaded and Grafana has the dashboard
+        run: python scripts/smoke_check.py --grafana-password "${TF_VAR_grafana_admin_password}"
       - name: Show cluster state
         if: always()
         run: |
