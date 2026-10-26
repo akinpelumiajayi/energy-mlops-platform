@@ -35,7 +35,7 @@ def test_rejects_wrong_history_length():
 def test_metrics_exposed_for_prometheus():
     client.post("/predict", json=[READING])
     text = client.get("/metrics").text
-    assert 'energy_api_requests_total{endpoint="/predict",status="200"}' in text
+    assert 'energy_api_requests_total{path="/predict",status="200"}' in text
     assert "energy_api_request_seconds_bucket" in text
     assert 'energy_feature_drift_zscore{feature="T_out"}' in text
     assert "energy_model_info{" in text

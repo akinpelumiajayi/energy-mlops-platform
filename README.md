@@ -55,7 +55,7 @@ The selected model cuts the average error by 39% against the naive baseline. Wit
 
 | Metric | What it shows |
 |---|---|
-| `energy_api_requests_total{endpoint, status}` | traffic and error rate |
+| `energy_api_requests_total{path, status}` | traffic and error rate |
 | `energy_api_request_seconds` (histogram) | latency percentiles |
 | `energy_predicted_wh` (histogram) | spread of the forecasts |
 | `energy_feature_drift_zscore{feature}` | mean of the last 500 live inputs against the training mean, in standard deviations |

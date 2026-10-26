@@ -4,13 +4,13 @@ groups:
   - name: energy-api.rules
     rules:
       - record: energy:request_rate:5m
-        expr: sum(rate(energy_api_requests_total{endpoint="/predict"}[5m]))
+        expr: sum(rate(energy_api_requests_total{path="/predict"}[5m]))
       - record: energy:latency_p95_seconds:5m
-        expr: histogram_quantile(0.95, sum by (le) (rate(energy_api_request_seconds_bucket{endpoint="/predict"}[5m])))
+        expr: histogram_quantile(0.95, sum by (le) (rate(energy_api_request_seconds_bucket{path="/predict"}[5m])))
       - record: energy:error_ratio:5m
         expr: |
-          sum(rate(energy_api_requests_total{endpoint="/predict",status=~"5.."}[5m]))
-            / clamp_min(sum(rate(energy_api_requests_total{endpoint="/predict"}[5m])), 1e-9)
+          sum(rate(energy_api_requests_total{path="/predict",status=~"5.."}[5m]))
+            / clamp_min(sum(rate(energy_api_requests_total{path="/predict"}[5m])), 1e-9)
 
   - name: energy-api.alerts
     rules:

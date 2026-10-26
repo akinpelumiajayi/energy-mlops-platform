@@ -30,7 +30,7 @@ def check_targets_up(a) -> str:
 
 
 def check_requests_counted(a) -> str:
-    result = prom(a.prometheus, 'sum(energy_api_requests_total{endpoint="/predict"})')
+    result = prom(a.prometheus, 'sum(energy_api_requests_total{path="/predict"})')
     assert result, "no request metrics yet"
     total = float(result[0]["value"][1])
     assert total >= a.min_requests, f"only {total:.0f} requests counted"
