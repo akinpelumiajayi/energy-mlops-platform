@@ -1,22 +1,23 @@
 terraform {
   required_version = ">= 1.6"
 
+  # Exact versions for every run uses tested providers.
   required_providers {
     kind = {
       source  = "tehcyx/kind"
-      version = "~> 0.6"
+      version = "0.13.0"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 2.16"
+      version = "2.17.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "~> 2.33"
+      version = "2.38.0"
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.2"
+      version = "3.2.2"
     }
   }
 }
