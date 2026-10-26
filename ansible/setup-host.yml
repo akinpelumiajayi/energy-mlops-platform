@@ -1,0 +1,119 @@
+---
+# Prepares an Ubuntu 22.04 or 24.04 host to run this project:
+# Docker, kind, kubectl, Terraform and Helm, pinned to tested versions.
+#
+#   ansible-playbook setup-host.yml --ask-become-pass
+#   ansible-playbook setup-host.yml --tags kubernetes --check     # dry run of one part
+
+- name: Set up an MLOps development host
+  hosts: devhosts
+  become: true
+
+  vars:
+    arch: amd64
+    kind_version: v0.24.0
+    kubectl_version: v1.31.2
+    helm_version: v3.16.2
+    host_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
+
+  pre_tasks:
+    - name: Check the operating system is supported
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_major_version'] | int >= 22
+        fail_msg: "This playbook supports Ubuntu 22.04 or later."
+
+  tasks:
+    - name: Install base packages
+      tags: [base]
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, gnupg, unzip, git, python3-pip, python3-venv, make]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install Docker
+      tags: [docker]
+      block:
+        - name: Install Docker Engine from Ubuntu packages
+          ansible.builtin.apt:
+            name: [docker.io, docker-buildx]
+            state: present
+
+        - name: Start Docker and enable it at boot
+          ansible.builtin.systemd_service:
+            name: docker
+            state: started
+            enabled: true
+
+        - name: Let the host user run Docker without sudo
+          ansible.builtin.user:
+            name: "{{ host_user }}"
+            groups: docker
+            append: true
+
+    - name: Install Kubernetes tools
+      tags: [kubernetes]
+      block:
+        - name: Download kind
+          ansible.builtin.get_url:
+            url: "https://github.com/kubernetes-sigs/kind/releases/download/{{ kind_version }}/kind-linux-{{ arch }}"
+            dest: /usr/local/bin/kind
+            mode: "0755"
+
+        - name: Download kubectl
+          ansible.builtin.get_url:
+            url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/{{ arch }}/kubectl"
+            checksum: "sha256:https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/{{ arch }}/kubectl.sha256"
+            dest: /usr/local/bin/kubectl
+            mode: "0755"
+
+        - name: Download Helm
+          ansible.builtin.unarchive:
+            src: "https://get.helm.sh/helm-{{ helm_version }}-linux-{{ arch }}.tar.gz"
+            dest: /usr/local/bin
+            remote_src: true
+            extra_opts: [--strip-components=1, --wildcards, "*/helm"]
+            creates: /usr/local/bin/helm
+
+    - name: Install Terraform
+      tags: [terraform]
+      block:
+        - name: Add the HashiCorp signing key
+          ansible.builtin.get_url:
+            url: https://apt.releases.hashicorp.com/gpg
+            dest: /usr/share/keyrings/hashicorp.asc
+            mode: "0644"
+
+        - name: Add the HashiCorp apt repository
+          ansible.builtin.apt_repository:
+            repo: >-
+              deb [arch={{ arch }} signed-by=/usr/share/keyrings/hashicorp.asc]
+              https://apt.releases.hashicorp.com {{ ansible_facts['distribution_release'] }} main
+            filename: hashicorp
+            state: present
+
+        - name: Install Terraform
+          ansible.builtin.apt:
+            name: terraform
+            state: present
+            update_cache: true
+
+    - name: Report installed versions
+      tags: [always]
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - docker --version
+        - kind version
+        - kubectl version --client
+        - helm version --short
+        - terraform version
+      register: versions
+      changed_when: false
+      failed_when: false
+
+    - name: Show installed versions
+      tags: [always]
+      ansible.builtin.debug:
+        msg: "{{ versions.results | map(attribute='stdout') | list }}"

@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PROMETHEUS_VERSION: "2.55.1"
+  KIND_VERSION: "v0.24.0"
+
+jobs:
+  python:
+    name: Model and API tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Train on the real dataset and run tests
+        env:
+          PYTHONPATH: src:.
+        run: |
+          python -m energy.train
+          pytest -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model-metrics
+          path: model/metrics.json
+
+  monitoring:
+    name: Prometheus rules and Grafana queries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install promtool
+        run: |
+          curl -sSL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+            | tar xz --strip-components=1 -C /usr/local/bin "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+      - run: promtool check rules monitoring/alert-rules.yaml
+      - run: cd monitoring && promtool test rules alert-rules.test.yaml
+      - run: pip install pyyaml && python scripts/check_dashboard_queries.py promtool
+
+  ansible:
+    name: Ansible lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install ansible-core ansible-lint
+      - run: cd ansible && ansible-playbook setup-host.yml --syntax-check && ansible-lint setup-host.yml
+
+  terraform:
+    name: Terraform fmt and validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  e2e:
+    name: Deploy to kind with Terraform and test
+    needs: [python, monitoring, ansible, terraform]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TF_VAR_grafana_admin_password: ci-only-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install kind
+        run: |
+          curl -sSLo /usr/local/bin/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x /usr/local/bin/kind
+      - name: Build the API image (trains the model inside the build)
+        run: docker build -t energy-api:local .
+      - name: Terraform apply (kind cluster, Prometheus, Grafana, API)
+        working-directory: infra/terraform
+        run: terraform init && terraform apply -auto-approve
+      - name: Wait for the API
+        run: |
+          for i in $(seq 1 60); do curl -sf localhost:30080/health && exit 0; sleep 5; done
+          exit 1
+      - name: Replay real May readings through the API
+        run: |
+          pip install -r requirements.txt requests
+          python scripts/load_test.py --url http://localhost:30080 --period test --rps 20 --seconds 90
+      - name: Check Prometheus scrapes the API and Grafana has the dashboard
+        run: |
+          sleep 30
+          curl -s 'localhost:30090/api/v1/query?query=up{job="energy-api"}' | tee up.json
+          python -c "import json; r=json.load(open('up.json'))['data']['result']; assert r and all(x['value'][1]=='1' for x in r), r"
+          curl -s 'localhost:30090/api/v1/query?query=sum(energy_api_requests_total)' | tee req.json
+          python -c "import json; r=json.load(open('req.json'))['data']['result']; assert float(r[0]['value'][1]) > 100, r"
+          curl -s -u "admin:${TF_VAR_grafana_admin_password}" 'localhost:30030/api/search?query=Energy%20Forecast%20API' | tee dash.json
+          python -c "import json; assert json.load(open('dash.json')), 'dashboard missing'"
+      - name: Show cluster state
+        if: always()
+        run: |
+          export KUBECONFIG=$(terraform -chdir=infra/terraform output -raw kubeconfig_path)
+          kubectl get pods,svc,hpa -A || true
+      - name: Terraform destroy
+        if: always()
+        working-directory: infra/terraform
+        run: terraform destroy -auto-approve

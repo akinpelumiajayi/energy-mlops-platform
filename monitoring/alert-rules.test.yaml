@@ -1,0 +1,53 @@
+# Unit tests for the alert rules: promtool test rules monitoring/alert-rules.test.yaml
+rule_files:
+  - alert-rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: May weather drift fires a warning, not a critical alert
+    interval: 1m
+    input_series:
+      - series: 'energy_feature_drift_zscore{feature="T2"}'
+        values: '2.3x20'
+      - series: 'up{job="energy-api"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: EnergyFeatureDriftWarning
+        exp_alerts:
+          - exp_labels: { severity: warning, feature: T2 }
+            exp_annotations:
+              summary: "T2 has drifted 2.3 std from training data"
+              description: "Live inputs no longer look like the training months. Check forecast error and plan a retrain."
+      - eval_time: 15m
+        alertname: EnergyFeatureDriftCritical
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: EnergyApiDown
+        exp_alerts: []
+
+  - name: Simulated heatwave fires the critical drift alert
+    interval: 1m
+    input_series:
+      - series: 'energy_feature_drift_zscore{feature="T_out"}'
+        values: '4.1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: EnergyFeatureDriftCritical
+        exp_alerts:
+          - exp_labels: { severity: critical, feature: T_out }
+            exp_annotations:
+              summary: "T_out has drifted 4.1 std from training data. Retrain the model."
+
+  - name: Missing scrape target fires EnergyApiDown
+    interval: 1m
+    input_series:
+      - series: 'up{job="energy-api"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: EnergyApiDown
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "No healthy energy-api pods are being scraped"
+              runbook: "kubectl -n energy get pods; kubectl -n energy logs deploy/energy-api"
