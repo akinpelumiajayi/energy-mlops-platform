@@ -1,0 +1,52 @@
+# Prometheus alert rules for the energy forecast API.
+# Checked with: promtool check rules monitoring/alert-rules.yaml
+groups:
+  - name: energy-api.rules
+    rules:
+      - record: energy:request_rate:5m
+        expr: sum(rate(energy_api_requests_total{endpoint="/predict"}[5m]))
+      - record: energy:latency_p95_seconds:5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(energy_api_request_seconds_bucket{endpoint="/predict"}[5m])))
+      - record: energy:error_ratio:5m
+        expr: |
+          sum(rate(energy_api_requests_total{endpoint="/predict",status=~"5.."}[5m]))
+            / clamp_min(sum(rate(energy_api_requests_total{endpoint="/predict"}[5m])), 1e-9)
+
+  - name: energy-api.alerts
+    rules:
+      - alert: EnergyApiDown
+        expr: absent(up{job="energy-api"} == 1)
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "No healthy energy-api pods are being scraped"
+          runbook: "kubectl -n energy get pods; kubectl -n energy logs deploy/energy-api"
+
+      - alert: EnergyApiHighLatency
+        expr: energy:latency_p95_seconds:5m > 0.25
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 latency is {{ $value | humanizeDuration }}, above the 250 ms target"
+
+      - alert: EnergyApiHighErrorRate
+        expr: energy:error_ratio:5m > 0.02
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of forecast requests are failing"
+
+      - alert: EnergyFeatureDriftWarning
+        expr: max by (feature) (abs(energy_feature_drift_zscore)) > 1.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.feature }} has drifted {{ $value | printf \"%.1f\" }} std from training data"
+          description: "Live inputs no longer look like the training months. Check forecast error and plan a retrain."
+
+      - alert: EnergyFeatureDriftCritical
+        expr: max by (feature) (abs(energy_feature_drift_zscore)) > 3
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.feature }} has drifted {{ $value | printf \"%.1f\" }} std from training data. Retrain the model."

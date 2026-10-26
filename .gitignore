@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+model/
+# Terraform
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+infra/terraform/*-config

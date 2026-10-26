@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars and change the password. terraform.tfvars is git-ignored.
+grafana_admin_password = "change-me-please"
+api_replicas           = 2
+api_max_replicas       = 5

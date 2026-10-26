@@ -1,0 +1,9 @@
+.venv
+data
+model
+.git
+.github
+infra
+ansible
+tests
+__pycache__
