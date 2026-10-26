@@ -83,8 +83,9 @@ jobs:
           python-version: "3.11"
       - name: Install kind
         run: |
-          curl -sSLo /usr/local/bin/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          chmod +x /usr/local/bin/kind
+          curl -sSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 kind /usr/local/bin/kind
+          kind version
       - name: Build the API image (trains the model inside the build)
         run: docker build -t energy-api:local .
       - name: Terraform apply (kind cluster, Prometheus, Grafana, API)
@@ -110,9 +111,16 @@ jobs:
       - name: Show cluster state
         if: always()
         run: |
-          export KUBECONFIG=$(terraform -chdir=infra/terraform output -raw kubeconfig_path)
-          kubectl get pods,svc,hpa -A || true
+          if [ -f infra/terraform/terraform.tfstate ]; then
+            export KUBECONFIG=$(terraform -chdir=infra/terraform output -raw kubeconfig_path)
+            kubectl get pods,svc,hpa -A || true
+            kubectl -n energy describe pods || true
+          fi
       - name: Terraform destroy
         if: always()
         working-directory: infra/terraform
-        run: terraform destroy -auto-approve
+        run: |
+          # only when apply got far enough to create state
+          if [ -f terraform.tfstate ]; then
+            terraform destroy -auto-approve || kind delete cluster --name energy-mlops
+          fi
