@@ -42,6 +42,6 @@ resource "null_resource" "load_image" {
   }
 
   provisioner "local-exec" {
-    command = "kind load docker-image ${var.image} --name ${kind_cluster.this.name}"
+    command = "bash ${path.module}/../../scripts/load_image_into_kind.sh ${var.image} ${kind_cluster.this.name}"
   }
 }
